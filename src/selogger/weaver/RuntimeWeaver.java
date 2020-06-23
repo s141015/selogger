@@ -195,7 +195,9 @@ public class RuntimeWeaver implements ClassFileTransformer {
 			} else {
 				l = "(Unknown Source)";
 			}
-
+			if (l.contains("/.m2/")){
+				return null;
+			}
 			byte[] buffer = weaver.weave(l, className, classfileBuffer, loader);
 
 			return buffer;
