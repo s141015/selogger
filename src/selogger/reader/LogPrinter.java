@@ -7,8 +7,8 @@ import selogger.weaver.DataInfo;
 import selogger.weaver.MethodInfo;
 
 /**
- * Print events to stdout in a textual format.
- * @author ishio
+ * A main class to read log files from a specified directory and 
+ * print the events to stdout in a textual format.
  */
 public class LogPrinter {
 
@@ -59,6 +59,8 @@ public class LogPrinter {
 			}
 			reader.setProcessParams(processParams);
 			for (Event event = reader.nextEvent(); event != null && event.getEventId() < to; event = reader.nextEvent()) {
+				// Stop the execution if System.out encountered an error (e.g. a pipe to the UNIX's head command has been closed)
+				if (System.out.checkError()) break;
 
 				// Check the thread of the event
 				if (threads != null) {
@@ -93,7 +95,7 @@ public class LogPrinter {
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
-			System.err.println("Usage: LogPrinter log-directory [-from=N] [-num=M] [-locationdir=LocationFileDir] [-thread=ThreadList] [-processparams]");
+			System.err.println("Usage: LogPrinter log-directory [-from=N] [-num=M] [-thread=ThreadList] [-processparams]");
 		}
 	}
 	

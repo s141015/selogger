@@ -11,15 +11,21 @@ import java.util.Set;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.objectweb.asm.ClassReader;
 
 import selogger.EventType;
 import selogger.logging.Logging;
 import selogger.logging.io.MemoryLogger;
 
+/**
+ * This test class tries different configurations of weaving
+ * and compare the frequency of events.
+ * (The same number of events must be observed)
+ */
+public class WeaverAllTest {
 
-public class WeaverTestAll {
-
+	/**
+	 * Counting the number of events
+	 */
 	private static class Counter {
 		private int c = 0;
 		public void increment() {
@@ -31,6 +37,9 @@ public class WeaverTestAll {
 		}
 	}
 	
+	/**
+	 * Count the number of events for each EventType
+	 */
 	private static class Counters {
 		
 		private Map<EventType, Counter> counters;
@@ -55,28 +64,31 @@ public class WeaverTestAll {
 		}
 	}
 	
-	
-	
+
+	/**
+	 * Execute a weaving for a given configuration,
+	 * execute the "testAll" method,
+	 * and then return the observed event frequency. 
+	 * @param config specifies a weaving configuration
+	 * @return the observed events
+	 * @throws IOException
+	 */
 	public Counters getEventFrequency(WeaveConfig config) throws IOException {
-		WeaveLog weaveLog = new WeaveLog(0, 0, 0);
-		String className = "selogger/testdata/SimpleTarget";
-		ClassReader r = new ClassReader(className);
-		ClassTransformer c = new ClassTransformer(weaveLog, config, r, this.getClass().getClassLoader());
-		WeaveClassLoader loader = new WeaveClassLoader();
-		Class<?> wovenClass = loader.createClass("selogger.testdata.SimpleTarget", c.getWeaveResult());
+		// Weave the classes
 		MemoryLogger memoryLogger = Logging.initializeForTest();
-		
-		ClassReader r2 = new ClassReader("selogger/testdata/SimpleTarget$StringComparator");
-		ClassTransformer c2 = new ClassTransformer(weaveLog, config, r2, this.getClass().getClassLoader());
-		loader.createClass("selogger.testdata.SimpleTarget$StringComparator", c2.getWeaveResult());
+		WeaveClassLoader loader = new WeaveClassLoader(config);
+		Class<?> wovenClass = loader.loadAndWeaveClass("selogger.testdata.SimpleTarget");
+		loader.loadAndWeaveClass("selogger.testdata.SimpleTarget$StringComparator");
 		
 		try {
-			Counters counters = new Counters();
-			Object o = wovenClass.newInstance();
+			// Execute the testAll method
+			Object o = wovenClass.getConstructor().newInstance();
 			Method method = wovenClass.getMethod("testAll", new Class<?>[0]);
 			method.invoke(o);
 	
-			EventIterator it = new EventIterator(memoryLogger, weaveLog);
+			// Count the events
+			Counters counters = new Counters();
+			EventIterator it = new EventIterator(memoryLogger, loader.getWeaveLog());
 			while (it.next()) {
 				counters.increment(it.getEventType());
 			}
@@ -86,11 +98,15 @@ public class WeaverTestAll {
 			return null;
 			
 		} finally {
+			// unload classes
 			wovenClass = null;
 			loader = null;
 		}
 	}
 	
+	/**
+	 * Check that two Counters have the same count for given event types  
+	 */
 	private void assertSameCount(Counters c1, Counters c2, Set<EventType> types) {
 		for (EventType t: EventType.values()) {
 			if (types.contains(t)) {
@@ -101,6 +117,9 @@ public class WeaverTestAll {
 		}
 	}
 
+	/**
+	 * Events recorded when "EXEC" option is given
+	 */
 	private HashSet<EventType> execEvents;
 	private HashSet<EventType> callEvents;
 	private HashSet<EventType> execParamEvents;
@@ -111,8 +130,11 @@ public class WeaverTestAll {
 	private HashSet<EventType> syncEvents;
 	private HashSet<EventType> objectEvents;
 	private HashSet<EventType> labelEvents;
+	private HashSet<EventType> lineEvents;
 	
-	
+	/**
+	 * Prepare events object 
+	 */
 	@Before 
 	public void setUp() {
 		execEvents = new HashSet<>(Arrays.asList(new EventType[] {EventType.METHOD_ENTRY, EventType.METHOD_NORMAL_EXIT, EventType.METHOD_EXCEPTIONAL_EXIT, EventType.METHOD_THROW, EventType.METHOD_OBJECT_INITIALIZED}));
@@ -126,9 +148,13 @@ public class WeaverTestAll {
 		arrayEvents = new HashSet<>(Arrays.asList(new EventType[] {EventType.ARRAY_LENGTH, EventType.ARRAY_LENGTH_RESULT, EventType.ARRAY_LOAD, EventType.ARRAY_LOAD_INDEX, EventType.ARRAY_LOAD_RESULT, EventType.ARRAY_STORE, EventType.ARRAY_STORE_INDEX, EventType.ARRAY_STORE_VALUE, EventType.MULTI_NEW_ARRAY, EventType.MULTI_NEW_ARRAY_ELEMENT, EventType.MULTI_NEW_ARRAY_OWNER, EventType.NEW_ARRAY, EventType.NEW_ARRAY_RESULT, EventType.CATCH, EventType.CATCH_LABEL}));
 		syncEvents = new HashSet<>(Arrays.asList(new EventType[] {EventType.MONITOR_ENTER, EventType.MONITOR_ENTER_RESULT, EventType.MONITOR_EXIT, EventType.CATCH, EventType.CATCH_LABEL}));
 		objectEvents = new HashSet<>(Arrays.asList(new EventType[] {EventType.OBJECT_CONSTANT_LOAD, EventType.OBJECT_INSTANCEOF, EventType.OBJECT_INSTANCEOF_RESULT}));
-		labelEvents = new HashSet<>(Arrays.asList(new EventType[] {EventType.LABEL, EventType.CATCH, EventType.CATCH_LABEL, EventType.METHOD_THROW}));
+		labelEvents = new HashSet<>(Arrays.asList(new EventType[] {EventType.LABEL, EventType.CATCH, EventType.CATCH_LABEL}));
+		lineEvents = new HashSet<>(Arrays.asList(new EventType[] {EventType.LINE_NUMBER}));
 	}
 
+	/**
+	 * Check that all event types are recorded in a trace 
+	 */
 	@Test
 	public void testMethodImplementation() throws IOException {
 		Counters all = getEventFrequency(new WeaveConfig(WeaveConfig.KEY_RECORD_ALL));
@@ -142,6 +168,9 @@ public class WeaverTestAll {
 		}
 	}
 
+	/**
+	 * Check that default mode records the same number of events as ALL mode except for some event types 
+	 */
 	@Test
 	public void testDefaultMode() throws IOException {
 		Counters all = getEventFrequency(new WeaveConfig(WeaveConfig.KEY_RECORD_ALL));
@@ -153,6 +182,7 @@ public class WeaverTestAll {
 				t != EventType.RET && 
 				t != EventType.JUMP && 
 				t != EventType.LABEL &&
+				t != EventType.LINE_NUMBER &&
 				!localEvents.contains(t)) {
 				events.add(t);
 			}
@@ -170,7 +200,8 @@ public class WeaverTestAll {
 				t != EventType.DIVIDE && 
 				t != EventType.RET && 
 				t != EventType.JUMP && 
-				t != EventType.LABEL) {
+				t != EventType.LABEL &&
+				t != EventType.LINE_NUMBER) {
 				events.add(t);
 			}
 		}
@@ -244,6 +275,14 @@ public class WeaverTestAll {
 		Counters all = getEventFrequency(new WeaveConfig(WeaveConfig.KEY_RECORD_ALL));
 		Counters sync = getEventFrequency(new WeaveConfig(WeaveConfig.KEY_RECORD_SYNC));
 		assertSameCount(all, sync, syncEvents);
+	}
+
+	@Test
+	public void testLineConfigurations() throws IOException {
+		Counters all = getEventFrequency(new WeaveConfig(WeaveConfig.KEY_RECORD_ALL));
+		Counters line = getEventFrequency(new WeaveConfig(WeaveConfig.KEY_RECORD_LINE));
+		Assert.assertTrue(line.count(EventType.LINE_NUMBER) > 0);
+		assertSameCount(all, line, lineEvents);
 	}
 
 	@Test

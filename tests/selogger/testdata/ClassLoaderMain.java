@@ -1,9 +1,8 @@
 package selogger.testdata;
 
-import java.io.IOException;
 import java.net.URL;
 
-import org.objectweb.asm.ClassReader;
+import selogger.weaver.WeaveClassLoader;
 
 /**
  * Test case for #1.
@@ -18,14 +17,14 @@ public class ClassLoaderMain {
 		 */
 		@Override
 		public Class<?> loadClass(String name) throws ClassNotFoundException {
-			try {
-				if (name.startsWith("java.")) return super.loadClass(name);
-				ClassReader r = new ClassReader(name);
+			if (name.startsWith("java.")) return super.loadClass(name);
+			byte[] buf = WeaveClassLoader.readAllBytesOfClass(ClassLoader.getSystemResourceAsStream(name + ".class"));
+			if (buf != null) {
 				System.out.println(name);
-				Class<?> c = defineClass(name, r.b, 0, r.b.length);
+				Class<?> c = defineClass(name, buf, 0, buf.length);
 				return c;
-			} catch (IOException e) {
-				return null;
+			} else {
+				throw new ClassNotFoundException(name);
 			}
 		}
 		
@@ -59,7 +58,7 @@ public class ClassLoaderMain {
 		CustomizedCLassLoader cl = new CustomizedCLassLoader();
 		try {
 			Class<?> c = cl.loadClass("selogger.testdata.ClassLoaderMain$A");
-			Object o = c.newInstance();
+			Object o = c.getDeclaredConstructor().newInstance();
 			System.out.println(o.toString());
 		} catch (Throwable e) {
 			e.printStackTrace();

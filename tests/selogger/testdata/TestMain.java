@@ -1,5 +1,8 @@
 package selogger.testdata;
 
+/**
+ * A test data class including methods manipulated by the weaver. 
+ */
 public class TestMain {
 
 	public static void main(String[] args) {
@@ -14,7 +17,7 @@ public class TestMain {
 	public TestMain() {
 		f = "0";
 		g = 1;
-		h = new Integer(2);
+		h = Integer.valueOf(2);
 	}
 
 	public void print() {

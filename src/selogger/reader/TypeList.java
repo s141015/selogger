@@ -11,7 +11,6 @@ import selogger.logging.util.TypeIdMap;
 
 /**
  * This is a class to read Type IDs created by TypeIdMap.
- * @author ishio
  */
 public class TypeList {
 
@@ -113,28 +112,53 @@ public class TypeList {
 			return records.get(id).componentTypeId;
 		}
 	}
+	
+	/**
+	 * @param id
+	 * @return a class loader ID indicating the class loader who loaded this type.
+	 * This method returns null if the data is unavailable.
+	 */
+	public String getClassLoaderId(int id) {
+		if (id == TypeIdMap.TYPEID_NULL) {
+			return null;
+		} else if (id >= records.size()) {
+			return null;
+		} else {
+			return records.get(id).classLoaderId;
+		}
+	}
 
+	/**
+	 * A data structure object for internal use.
+	 */
 	private static class TypeRecord {
 		private int id;
 		private String name;
 		private String url;
 		private int parentTypeId;
 		private int componentTypeId;
+		private String classLoaderId;
 		
 		public TypeRecord(String line) {
 			String[] tokens = line.split(",");
-			if (tokens.length == 5) {
+			if (tokens.length >= 5) {
 				id = Integer.parseInt(tokens[0]);
 				name = tokens[1];
 				url = (tokens[2].equals("")) ? null: tokens[2];
 				parentTypeId = Integer.parseInt(tokens[3]);
 				componentTypeId = Integer.parseInt(tokens[4]);
+				if (tokens.length == 6) {
+					classLoaderId = tokens[5];
+				} else {
+					classLoaderId = null;
+				}
 			} else if (tokens.length == 2) { // an old format
 				id = Integer.parseInt(tokens[0]);
 				name = tokens[1];
 				url = null;
 				parentTypeId = UNAVAILABLE;
 				componentTypeId = UNAVAILABLE;
+				classLoaderId = null;
 			}
 		}
 	}

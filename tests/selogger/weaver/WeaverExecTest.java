@@ -9,17 +9,18 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.objectweb.asm.ClassReader;
 
 import selogger.EventType;
 import selogger.logging.Logging;
 import selogger.logging.io.MemoryLogger;
 import selogger.weaver.method.Descriptor;
 
+/**
+ * This class tests the events recorded by the "EXEC" configuration.
+ * (WeaverTestAll checks only the frequency of events) 
+ */
+public class WeaverExecTest {
 
-public class WeaverTestExec {
-
-	private WeaveLog weaveLog;
 	private Class<?> wovenClass;
 	@SuppressWarnings("unused")
 	private Class<?> innerClass;
@@ -29,19 +30,13 @@ public class WeaverTestExec {
 	
 	@Before
 	public void setup() throws IOException {
-		weaveLog = new WeaveLog(0, 0, 0);
-		String className = "selogger/testdata/SimpleTarget";
-		ClassReader r = new ClassReader(className);
 		WeaveConfig config = new WeaveConfig(WeaveConfig.KEY_RECORD_EXEC); 
-		ClassTransformer c = new ClassTransformer(weaveLog, config, r, this.getClass().getClassLoader());
-		WeaveClassLoader loader = new WeaveClassLoader();
-		wovenClass = loader.createClass("selogger.testdata.SimpleTarget", c.getWeaveResult());
-		memoryLogger = Logging.initializeForTest();
-		
-		ClassReader r2 = new ClassReader("selogger/testdata/SimpleTarget$StringComparator");
-		innerClass = loader.createClass("selogger.testdata.SimpleTarget$StringComparator", r2.b) ;
+		WeaveClassLoader loader = new WeaveClassLoader(config);
+		wovenClass = loader.loadAndWeaveClass("selogger.testdata.SimpleTarget");
+		innerClass = loader.loadClassFromResource("selogger.testdata.SimpleTarget$StringComparator", "selogger/testdata/SimpleTarget$StringComparator.class");
 
-		it = new EventIterator(memoryLogger, weaveLog);
+		memoryLogger = Logging.initializeForTest();
+		it = new EventIterator(memoryLogger, loader.getWeaveLog());
 	}
 	
 	@After
@@ -78,7 +73,7 @@ public class WeaverTestExec {
 	@Test
 	public void testWeaving() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -103,7 +98,7 @@ public class WeaverTestExec {
 	@Test
 	public void testArray() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -128,7 +123,7 @@ public class WeaverTestExec {
 	@Test
 	public void testException() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 
 		// Check events
 		testBaseEvents(it, o);
@@ -169,7 +164,7 @@ public class WeaverTestExec {
 	@Test
 	public void testSynchronization() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 
 		// Check events
 		testBaseEvents(it, o);
@@ -196,7 +191,7 @@ public class WeaverTestExec {
 	@Test
 	public void testRead() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 
 		// Check events
 		testBaseEvents(it, o);
@@ -222,7 +217,7 @@ public class WeaverTestExec {
 	@Test
 	public void testMultiarray() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -248,7 +243,7 @@ public class WeaverTestExec {
 	@Test
 	public void testConstString() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -275,7 +270,7 @@ public class WeaverTestExec {
 	@Test
 	public void testTypeCheck() throws IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 
 		// Check events
 		testBaseEvents(it, o);
@@ -316,7 +311,7 @@ public class WeaverTestExec {
 	public void testSort() throws IOException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -348,7 +343,7 @@ public class WeaverTestExec {
 	public void testInvokeVirtual() throws IOException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -396,7 +391,7 @@ public class WeaverTestExec {
 	public void testInvokeDynamic() throws IOException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -434,7 +429,7 @@ public class WeaverTestExec {
 	public void testInvokeDynamic2() throws IOException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -473,7 +468,7 @@ public class WeaverTestExec {
 	public void testFloat() throws IOException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);
@@ -499,7 +494,7 @@ public class WeaverTestExec {
 	public void testExceptionInCall() throws IOException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException {
 
 		// Event generation
-		Object o = wovenClass.newInstance();
+		Object o = wovenClass.getDeclaredConstructor().newInstance();
 		
 		// Check events
 		testBaseEvents(it, o);

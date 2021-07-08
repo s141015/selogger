@@ -1,7 +1,10 @@
 package selogger;
 
 
-
+/**
+ * This enum defines all the event types in an execution trace.
+ * Each event type name is used as a string constant to read/write the event name.
+ */
 public enum EventType {
 
 	/**
@@ -358,7 +361,14 @@ public enum EventType {
 	 * A LABEL event may refer to this type as a control-flow path 
 	 * if divided-by-zero exception occurred. 
 	 */
-	DIVIDE
+	DIVIDE,
+	
+	/**
+	 * LINE_NUMBER event.
+	 * This event is recorded when a program executed a particular line of source code.
+	 * This event is a subset of LABEL events because line numbers are linked to labels.
+	 */
+	LINE_NUMBER
 	;
 	
 }

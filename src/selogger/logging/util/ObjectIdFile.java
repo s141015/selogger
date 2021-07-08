@@ -4,6 +4,9 @@ import java.io.File;
 import java.io.IOException;
 
 
+/**
+ * This class added type ID management and file save features to ObjectIdMap class. 
+ */
 public class ObjectIdFile extends ObjectIdMap {
 
 	private final String lineSeparator = "\n";
@@ -20,6 +23,14 @@ public class ObjectIdFile extends ObjectIdMap {
 	public static long cacheHit = 0;
 	public static long cacheMiss = 0;
 
+	/**
+	 * Create an instance to record object types.
+	 * @param outputDir is a directory for output files.
+	 * @param recordString is a flag to recording string contents.
+	 * If the flag is true, this object records the contents of String objects in files.
+	 * @param typeToId is an object to translate a type into an integer representing a type.
+	 * @throws IOException
+	 */
 	public ObjectIdFile(File outputDir, boolean recordString, TypeIdMap typeToId) throws IOException {
 		super(16 * 1024 * 1024);
 		this.typeToId = typeToId;
@@ -34,18 +45,27 @@ public class ObjectIdFile extends ObjectIdMap {
 		}
 	}
 	
+	/**
+	 * Register a type for each new object.
+	 * This is separated from onNewObjectId because this method 
+	 * calls TypeIdMap.createTypeRecord that may call a ClassLoader's method.
+	 * If the ClassLoader is also monitored by SELogger,  
+	 * the call indirectly creates another object ID.
+	 */
 	@Override
 	protected void onNewObject(Object o) {
 		typeToId.getTypeIdString(o.getClass());
 	}
 
+	/**
+	 * Record an object ID and its Type ID in a file.
+	 * In case of String and Throwable, this method also record their textual contents.
+	 */
 	@Override
 	protected void onNewObjectId(Object o, long id) {
 		String typeId = typeToId.getTypeIdString(o.getClass());
-		objectIdList.write(Long.toString(id));
-		objectIdList.write(",");
-		objectIdList.write(typeId);
-		objectIdList.write(lineSeparator);
+		String element = Long.toString(id) + "," + typeId + lineSeparator;
+		objectIdList.write(element);
 		
 		if (o instanceof String) {
 			if (stringContentList != null) {
@@ -98,7 +118,10 @@ public class ObjectIdFile extends ObjectIdMap {
 		}
 	}
 	
-	public void close() {
+	/**
+	 * Close the files written by this object.
+	 */
+	public synchronized void close() {
 		objectIdList.close();
 		exceptionList.close();
 		if (stringContentList != null) stringContentList.close();

@@ -4,6 +4,8 @@ import selogger.EventType;
 import selogger.weaver.WeaveLog;
 import selogger.weaver.WeaveConfig;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Stack;
@@ -15,10 +17,24 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.LocalVariablesSorter;
 import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FrameNode;
+import org.objectweb.asm.tree.IincInsnNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.LocalVariableNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
+
+/**
+ * This class is the main implementation of the weaving process for each method. 
+ * This class extends LocalVariablesSorter because this class insert 
+ * additional local variables to temporarily preserves method parameters. 
+ */
 public class MethodTransformer extends LocalVariablesSorter {
 
 	public static final String LOGGER_CLASS = "selogger/logging/Logging";
@@ -29,9 +45,14 @@ public class MethodTransformer extends LocalVariablesSorter {
 	private WeaveConfig config;
 	private int currentLine;
 	private String className;
+	private String sourceFileName;
 	private int access;
 	private String methodName;
 	private String methodDesc;
+	
+	/**
+	 * The index represents the original location in the InsnList object.
+	 */
 	private int instructionIndex;
 	
 	private LocalVariables variables;
@@ -41,24 +62,45 @@ public class MethodTransformer extends LocalVariablesSorter {
 	private HashMap<Label, String> catchBlockInfo = new HashMap<>();
 	private boolean isStartLabelLocated;
 	private HashMap<Label, String> labelStringMap = new HashMap<Label, String>();
+	private HashMap<Label, Integer> labelLineNumberMap = new HashMap<Label, Integer>();
 
+	/// To check a pair of NEW instruction and its constructor call 
 	private Stack<ANewInstruction> newInstructionStack = new Stack<ANewInstruction>();
 
-	private int lastDataIdVar;
+	// Intentionally set -1 to represent "uninitialized"
+	private int lastDataIdVar = -1;
 
 	/**
 	 * In a constructor, this flag becomes true after the super() is called.
 	 */
 	private boolean afterInitialization;
 
+	/**
+	 * To skip ARRAY STORE instructions after an array creation
+	 */
 	private boolean afterNewArray = false;
 
+	/**
+	 * Initialize the instance 
+	 * @param w is to log the progress
+	 * @param config is the configuration of the weaving
+	 * @param sourceFileName is a source file name (just for logging the progress)
+	 * @param className is a class name
+	 * @param outerClassName is outer class name if this class is ineer class 
+	 * @param access is modifiers of the method
+	 * @param methodName is a method name 
+	 * @param methodDesc is a descriptor (parameter types and a return type)
+	 * @param signature is a generics signature
+	 * @param exceptions represents a throws clause
+	 * @param mv is the object for writing bytecode
+	 */
 	public MethodTransformer(WeaveLog w, WeaveConfig config, String sourceFileName, String className, String outerClassName, int access,
 			String methodName, String methodDesc, String signature, String[] exceptions, MethodVisitor mv) {
 		super(Opcodes.ASM5, access, methodDesc, mv);
 		this.weavingInfo = w;
 		this.config = config;
 		this.className = className;
+		this.sourceFileName = sourceFileName;
 		// this.outerClassName = outerClassName; // not used
 		this.access = access;
 		this.methodName = methodName;
@@ -69,8 +111,6 @@ public class MethodTransformer extends LocalVariablesSorter {
 
 		this.instructionIndex = 0;
 
-		weavingInfo.startMethod(className, methodName, methodDesc, access, sourceFileName);
-		weavingInfo.nextDataId(-1, -1, EventType.RESERVED, Descriptor.Void, className + "#" + methodName + "#" + methodDesc);
 	}
 
 	/**
@@ -84,16 +124,47 @@ public class MethodTransformer extends LocalVariablesSorter {
 		
 		for (int i = 0; i < instructions.size(); ++i) {
 			AbstractInsnNode node = instructions.get(i);
+			
 			if (node.getType() == AbstractInsnNode.LABEL) {
+				// Record label names
 				Label label = ((LabelNode) node).getLabel();
 				String right = "00000" + Integer.toString(i);
 				String labelString = "L" + right.substring(right.length() - 5);
 				labelStringMap.put(label, labelString);
+
+			} else if (node.getType() == AbstractInsnNode.LINE) {
+				// Record line numbers corresponding to labels (because LINE is always placed AFTER its LABEL) 
+				LineNumberNode line = (LineNumberNode)node;
+				LabelNode label = line.start;
+				labelLineNumberMap.put(label.getLabel(), line.line);
 			}
 		}
+		
+		String hash = "";
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-1");
+			for (int i = 0; i < instructions.size(); ++i) {
+				String line = getInstructionString(instructions, i) + "\n";
+				digest.update(line.getBytes());
+			}
+			StringBuilder buf = new StringBuilder();
+			for (byte b: digest.digest()) {
+				int c = b;
+				c &= 0xff; 
+				buf.append(Character.forDigit(c / 16, 16));
+				buf.append(Character.forDigit(c % 16, 16));
+			}
+			hash = buf.toString();
+		} catch (NoSuchAlgorithmException e) {
+		}
+		
+		weavingInfo.startMethod(className, methodName, methodDesc, access, sourceFileName, hash);
+		weavingInfo.nextDataId(-1, -1, EventType.RESERVED, Descriptor.Void, className + "#" + methodName + "#" + methodDesc + "#size=" + instructions.size());
 	}
 
-
+	/**
+	 * End the weaving.
+	 */
 	@Override
 	public void visitEnd() {
 		super.visitEnd();
@@ -125,7 +196,14 @@ public class MethodTransformer extends LocalVariablesSorter {
 	@Override
 	public void visitLineNumber(int line, Label start) {
 		super.visitLineNumber(line, start);
-		this.currentLine = line;
+		
+		// currentLine should be always updated by visitLabel placed before the LABEL
+		assert this.currentLine == line;
+		
+		// Generate a line number event
+		if (config.recordLineNumber()) {
+			generateLogging(EventType.LINE_NUMBER, Descriptor.Void, "");
+		}
 		instructionIndex++;
 	}
 
@@ -228,6 +306,12 @@ public class MethodTransformer extends LocalVariablesSorter {
 		// Process the label
 		super.visitLabel(label);
 
+		// Update line number if there exists a corresponding LineNumberNode
+		Integer l = labelLineNumberMap.get(label);
+		if (l != null) {
+			currentLine = l.intValue();
+		}
+
 		if (config.recordCatch() && catchBlockInfo.containsKey(label)) {
 			// If the label is a catch block, record the previous location and an exception.
 			generateNewVarInsn(Opcodes.ILOAD, lastDataIdVar);
@@ -242,6 +326,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 		instructionIndex++;
 	}
 
+	/**
+	 * No additional actions but count the number of instructions.
+	 */
 	@Override
 	public void visitFrame(int type, int nLocal, Object[] local, int nStack, Object[] stack) {
 		super.visitFrame(type, nLocal, local, nStack, stack);
@@ -254,7 +341,7 @@ public class MethodTransformer extends LocalVariablesSorter {
 	@Override
 	public void visitJumpInsn(int opcode, Label label) {
 		if (config.recordLabel()) {
-			int dataId = nextDataId(EventType.JUMP, Descriptor.Void, "Instruction=" + OpcodesUtil.getString(opcode) + "JumpTo=" + getLabelString(label));
+			int dataId = nextDataId(EventType.JUMP, Descriptor.Void, "Instruction=" + OpcodesUtil.getString(opcode) + ",JumpTo=" + getLabelString(label));
 			generateLocationUpdate(dataId);
 		}
 		super.visitJumpInsn(opcode, label);
@@ -304,7 +391,7 @@ public class MethodTransformer extends LocalVariablesSorter {
 	}
 
 	/**
-	 * NEW, ANEWARRAY, INSTANCEOF instructions.
+	 * Insert logging code for NEW, ANEWARRAY, INSTANCEOF instructions.
 	 */
 	@Override
 	public void visitTypeInsn(int opcode, String type) {
@@ -340,12 +427,16 @@ public class MethodTransformer extends LocalVariablesSorter {
 		instructionIndex++;
 	}
 
+	/**
+	 * Insert logging code for a NEWARRAY instruction. 
+	 * It records the array size and a created array.
+	 */
 	@Override
 	public void visitIntInsn(int opcode, int operand) {
 		if (opcode == Opcodes.NEWARRAY) {
 			if (config.recordArrayInstructions()) {
-				// operand indicates an element type. 
-				// Record [SIZE] and [ARRAYREF]
+				// A static operand indicates an element type. 
+				// stack: [SIZE]
 				int dataId = generateLoggingPreservingStackTop(EventType.NEW_ARRAY, Descriptor.Integer, "ElementType=" + OpcodesUtil.getArrayElementType(operand));
 				super.visitIntInsn(opcode, operand); // -> stack: [ARRAYREF]
 				generateLoggingPreservingStackTop(EventType.NEW_ARRAY_RESULT, Descriptor.Object, "Parent=" + dataId);
@@ -360,6 +451,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 	}
 	
 
+	/**
+	 * Insert logging code for INVOKE instructions.
+	 */
 	@Override
 	public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
 
@@ -516,11 +610,20 @@ public class MethodTransformer extends LocalVariablesSorter {
 		instructionIndex++;
 	}
 
+	/**
+	 * Insert an instruction to store the current bytecode location to a local variable to track the control flow.  
+	 * @param dataId specifies the instruction location.
+	 */
 	private void generateLocationUpdate(int dataId) {
+		assert lastDataIdVar >= 0: "Uninitialized lastDataId";
 		super.visitLdcInsn(dataId);
 		generateNewVarInsn(Opcodes.ISTORE, lastDataIdVar);
 	}
 
+	/**
+	 * Insert logging code for a MultiANewArray instruction.
+	 * It records a created array and its elements.
+	 */
 	@Override
 	public void visitMultiANewArrayInsn(String desc, int dims) {
 		if (config.recordArrayInstructions()) {
@@ -538,6 +641,10 @@ public class MethodTransformer extends LocalVariablesSorter {
 		instructionIndex++;
 	}
 
+	/**
+	 * Insert logging code for an IINC instruction.
+	 * It records a value after increment.
+	 */
 	@Override
 	public void visitIincInsn(int var, int increment) {
 		super.visitIincInsn(var, increment);
@@ -554,7 +661,8 @@ public class MethodTransformer extends LocalVariablesSorter {
 	}
 	
 	/**
-	 * Extract a descriptor representing the return type of this method.
+	 * Extract a descriptor representing the return type of a given method descriptor.
+	 * TODO This should be moved to MethodParameters.
 	 */
 	private String getReturnValueDesc(String methodDesc) {
 		int index = methodDesc.indexOf(')');
@@ -562,6 +670,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 		return returnTypeName;
 	}
 	
+	/**
+	 * @return a descriptor representing the return type of this method.
+	 */
 	private Descriptor getDescForReturn() {
 		int index = methodDesc.lastIndexOf(')');
 		assert index >= 0: "Invalid method descriptor " + methodDesc;
@@ -569,6 +680,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 		return Descriptor.get(returnValueType);
 	}
 
+	/**
+	 * Insert logging code for various instructions.
+	 */
 	@Override
 	public void visitInsn(int opcode) {
 
@@ -578,10 +692,16 @@ public class MethodTransformer extends LocalVariablesSorter {
 			}
 			super.visitInsn(opcode);
 		} else if (opcode == Opcodes.ATHROW) {
-			if (config.recordExecution() || config.recordLabel()) {
+			if (config.recordExecution()) {
 				int dataId = generateLoggingPreservingStackTop(EventType.METHOD_THROW, Descriptor.Object, "");
+				if (config.recordCatch()) {
+					generateLocationUpdate(dataId);
+				}
+			} else if (config.recordCatch()) {
+				int dataId = nextDataId(EventType.METHOD_THROW, Descriptor.Void, "Instruction=ATHROW,Reason=(DataId is created for CATCH_LABEL events, not for recording actual METHOD_THROW events)");
 				generateLocationUpdate(dataId);
 			}
+
 			super.visitInsn(opcode);
 		} else if (OpcodesUtil.isArrayLoad(opcode)) {
 			if (config.recordArrayInstructions()) {
@@ -628,16 +748,23 @@ public class MethodTransformer extends LocalVariablesSorter {
 				opcode == Opcodes.FDIV ||
 				opcode == Opcodes.IDIV ||
 				opcode == Opcodes.LDIV) {
-			int dataId = nextDataId(EventType.DIVIDE, Descriptor.Void, "DIV");
-			generateLocationUpdate(dataId);
-			super.visitInsn(opcode);
-			generateLocationUpdate(0);
+			if (config.recordCatch()) {
+				int dataId = nextDataId(EventType.DIVIDE, Descriptor.Void, "DIV");
+				generateLocationUpdate(dataId);
+				super.visitInsn(opcode);
+				generateLocationUpdate(0);
+			} else {
+				super.visitInsn(opcode);
+			}
 		} else {
 			super.visitInsn(opcode);
 		}
 		instructionIndex++;
 	}
 
+	/**
+	 * Insert logging code for INVOKEDYNAMIC instruction.
+	 */
 	@Override
 	public void visitInvokeDynamicInsn(String name, String desc, Handle bsm, Object... bsmArgs) {
 		if (config.recordMethodCall()) {
@@ -695,18 +822,28 @@ public class MethodTransformer extends LocalVariablesSorter {
 		instructionIndex++;
 	}
 
+	/**
+	 * No additional actions but count the number of instructions.
+	 */
 	@Override
 	public void visitLookupSwitchInsn(Label dflt, int[] keys, Label[] labels) {
 		super.visitLookupSwitchInsn(dflt, keys, labels);
 		instructionIndex++;
 	}
 
+	/**
+	 * No additional actions but count the number of instructions.
+	 */
 	@Override
 	public void visitTableSwitchInsn(int min, int max, Label dflt, Label... labels) {
 		super.visitTableSwitchInsn(min, max, dflt, labels);
 		instructionIndex++;
 	}
 
+	/**
+	 * Insert logging code for a Load Constant instruction 
+	 * in order to record the constant object. 
+	 */
 	@Override
 	public void visitLdcInsn(Object cst) {
 		super.visitLdcInsn(cst); // -> [object]
@@ -718,6 +855,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 		instructionIndex++;
 	}
 
+	/**
+	 * Insert logging code for ARRAY LOAD instruction.
+	 */
 	private void generateRecordArrayLoad(int opcode) {
 		Descriptor elementDesc = OpcodesUtil.getDescForArrayLoad(opcode);
 
@@ -746,6 +886,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 		generateLocationUpdate(0);
 	}
 
+	/**
+	 * Insert logging code for ARRAY STORE instruction.
+	 */
 	private void generateRecordArrayStore(int opcode) {
 		String elementDesc = OpcodesUtil.getDescForArrayStore(opcode);
 		String methodDesc = "(Ljava/lang/Object;I" + elementDesc + "I)V";
@@ -772,6 +915,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 	}
 
 
+	/**
+	 * Insert logging code for field access instruction.
+	 */
 	@Override
 	public void visitFieldInsn(int opcode, String owner, String name, String desc) {
 		if (!config.recordFieldAccess()) {
@@ -846,12 +992,18 @@ public class MethodTransformer extends LocalVariablesSorter {
 	}
 
 	
+	/**
+	 * Create a new Data ID.
+	 */
 	private int nextDataId(EventType eventType, Descriptor desc, String label) {
 //		assert !label.contains(WeavingInfo.SEPARATOR) : "Location ID cannot includes WeavingInfo.SEPARATOR(" + WeavingInfo.SEPARATOR + ").";
 		return weavingInfo.nextDataId(currentLine, instructionIndex, eventType, desc, label);
 	}
 
 
+	/**
+	 * Insert logging code for local variable and RET instructions.
+	 */
 	@Override
 	public void visitVarInsn(int opcode, int var) {
 		if (config.recordLocalAccess()) {
@@ -890,8 +1042,9 @@ public class MethodTransformer extends LocalVariablesSorter {
 	}
 
 	/**
-	 * Use new local variables created by newLocal. This method does not use
-	 * super.visitVarInsn because visitVarInsn will renumber variable index. (A
+	 * Create a variable instruction using new local variables created by newLocal. 
+	 * This method does not use super.visitVarInsn because 
+	 * visitVarInsn will renumber variable index. (A
 	 * return value of newLocal is a renumbered index.)
 	 * 
 	 * @param opcode
@@ -947,5 +1100,86 @@ public class MethodTransformer extends LocalVariablesSorter {
 		}
 		return dataId;
 	}
+	
+	/**
+	 * @param method specifies a method containing an instruction.
+	 * @param index specifies the position of an instruction in the list of instructions.
+	 * @return a string representation of an instruction.
+	 */
+	private String getInstructionString(InsnList instructions, int index) {
+		if (index == -1) return "ARG";
+		
+		AbstractInsnNode node = instructions.get(index);
+		int opcode = node.getOpcode();
+		String op = Integer.toString(index) + ": " + OpcodesUtil.getString(opcode);
 
+		switch (node.getType()) {
+		case AbstractInsnNode.VAR_INSN:
+			
+			int var = ((VarInsnNode)node).var; // variable index
+			Descriptor d = OpcodesUtil.getDescForStore(opcode);
+			if (d != null) { // isStore
+				LocalVariableNode local = variables.getStoreVar(index, var);
+				if (local != null) {
+					return op + " " + Integer.toString(var) + " (" + local.name + ")";
+				} else {
+					return op + " " + Integer.toString(var);
+				}
+				
+			} else if (opcode == Opcodes.RET) {
+				return op + " " + var;
+			} else {
+				if (hasReceiver() && var == 0) {
+					return op + " (this)";
+				} else {
+					LocalVariableNode local = variables.getLoadVar(var);
+					if (local != null) {
+						return op + " " + Integer.toString(var) + " (" + local.name + ")";
+					} else {
+						return op + " " + Integer.toString(var);
+					}
+				}
+			}
+			
+		case AbstractInsnNode.IINC_INSN:
+			IincInsnNode iinc = (IincInsnNode)node;
+			LocalVariableNode local = variables.getLoadVar(iinc.var);
+			if (local != null) {
+				return op + " " + Integer.toString(iinc.incr) + ", " + Integer.toString(iinc.var) + " (" + local.name + ")";
+			} else {
+				return op + " " + Integer.toString(iinc.var) + ", " + Integer.toString(iinc.var);
+			}
+
+		case AbstractInsnNode.FIELD_INSN:
+			FieldInsnNode fieldNode = (FieldInsnNode)node;
+			return op + " " + fieldNode.owner + "#" + fieldNode.name + ": " + fieldNode.desc;
+			
+		case AbstractInsnNode.METHOD_INSN:
+			MethodInsnNode methodInsnNode = (MethodInsnNode)node;
+			return op + " " + methodInsnNode.owner + "#" + methodInsnNode.name + methodInsnNode.desc;
+		
+		case AbstractInsnNode.LINE:
+			return Integer.toString(index) + ": " + "(line)";
+			
+		case AbstractInsnNode.LABEL:
+			Label label = ((LabelNode) node).getLabel();
+			return Integer.toString(index) + ": " + "(" + labelStringMap.get(label) + ")";
+			
+		case AbstractInsnNode.JUMP_INSN:
+			JumpInsnNode jumpNode = (JumpInsnNode)node;
+			return op + " " + labelStringMap.get(jumpNode.label.getLabel());
+			
+		case AbstractInsnNode.FRAME:
+			FrameNode frameNode = (FrameNode)node;
+			return Integer.toString(index) + ": FRAME-OP(" + frameNode.type + ")";
+			
+		case AbstractInsnNode.LDC_INSN:
+			LdcInsnNode ldc = (LdcInsnNode)node;
+			return op + " " + ldc.cst.toString();
+		
+		default: 
+			return op; 
+		}
+	}
+	
 }
