@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Array;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -213,7 +214,22 @@ public class LatestEventTimeLogger implements IEventLogger {
 					buf.append(((byte[])array)[idx]);
 				} else if (array instanceof boolean[]) {
 					buf.append(((boolean[])array)[idx]);
-				} else {
+				} else if (array instanceof java.lang.Integer[]) {
+					buf.append(((Integer[])array)[idx]);
+				} else if (array instanceof java.lang.Long[]) {
+					buf.append(((Long[])array)[idx]);
+				} else if (array instanceof java.lang.Float[]) {
+					buf.append(((Float[])array)[idx]);
+				} else if (array instanceof java.lang.Double[]) {
+					buf.append(((Double[])array)[idx]);
+				} else if (array instanceof java.lang.Short[]) {
+					buf.append(((Short[])array)[idx]);
+				} else if (array instanceof java.lang.Byte[]) {
+					buf.append(((Byte[])array)[idx]);
+				} else if (array instanceof java.lang.Boolean[]) {
+					buf.append(((Boolean[])array)[idx]);
+				} 
+				else {
 					if (keepObject) {
 						Object o = ((Object[])array)[idx];
 						if (o == null) {
@@ -227,6 +243,9 @@ public class LatestEventTimeLogger implements IEventLogger {
 								buf.append("\"");
 							} else {
 								buf.append(id);
+								buf.append(":\"");
+								buf.append(dumpInstanceFields(o));
+								buf.append("\"");
 							}
 						}
 					} else {
@@ -255,6 +274,31 @@ public class LatestEventTimeLogger implements IEventLogger {
 				buf.append(threads[idx]);
 			}
 			return buf.toString();
+		}
+
+		private String dumpInstanceFields(Object object){
+			ArrayList<String> dump = new ArrayList<String>();
+ 			for (Field field : object.getClass().getDeclaredFields()) {
+				boolean accessible = field.isAccessible();
+				try {
+					field.setAccessible(true);
+					Class<?> type = field.getType();
+					String name = field.getName();
+					Object value = field.get(object);
+					dump.add(getTypeName(type) + " " + name + " = " + value);
+				  } catch(IllegalAccessException e){
+					  System.err.println(e);
+				  }finally {
+					field.setAccessible(accessible);
+				  }
+			}
+			return dump.toString();
+		}
+
+		private String getTypeName(Class type) {
+			if (!type.isArray())
+			  return type.getName();
+			return getTypeName(type.getComponentType()) + "[]";
 		}
 		
 		/**
@@ -403,9 +447,9 @@ public class LatestEventTimeLogger implements IEventLogger {
 	 */
 	@Override
 	public void recordEvent(int dataId, Object value) {
-		Buffer b = prepareBuffer(Object.class, dataId);
-		b.addObject(value);
-	}
+			Buffer b = prepareBuffer(Object.class, dataId);
+			b.addObject(value);
+		}
 	
 	/**
 	 * Record the event and the observed value.
